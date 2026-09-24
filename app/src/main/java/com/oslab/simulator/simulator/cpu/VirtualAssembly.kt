@@ -1,29 +1,7 @@
 package com.oslab.simulator.simulator.cpu
 
-/**
- * A minimal two-pass assembler for the instruction set in Instruction.kt.
- * This is the only thing "source" from an update package is ever turned
- * into — a flat list of Instruction values. There is no eval(), no
- * dynamic classloading, and no reflection anywhere in this path.
- *
- * Syntax (one instruction per line, '#' starts a comment, blank lines OK):
- *   label:
- *   PUSH <int>
- *   LOAD <name>
- *   STORE <name>
- *   ADD
- *   SUB
- *   JMP <label>
- *   JZ <label>
- *   CALL <label>
- *   RETURN
- *   READ <virtual/path>
- *   WRITE <virtual/path>
- *   CREATE_PROCESS <name>
- *   EXIT
- */
+/** Two-pass assembler for the safe vCPU instruction set. */
 object VirtualAssembly {
-
     sealed class ParseResult {
         data class Ok(val instructions: List<Instruction>) : ParseResult()
         data class Error(val message: String) : ParseResult()
@@ -33,55 +11,62 @@ object VirtualAssembly {
         val rawLines = source.lines()
             .map { it.substringBefore('#').trim() }
             .filter { it.isNotEmpty() }
-
-        // Pass 1: strip label declarations, recording their target index in
-        // the *instruction* stream (not the raw line stream).
         val labels = mutableMapOf<String, Int>()
         val opLines = mutableListOf<String>()
+
         for (line in rawLines) {
             if (line.endsWith(":") && !line.contains(" ")) {
-                labels[line.dropLast(1)] = opLines.size
-            } else {
-                opLines.add(line)
-            }
+                val label = line.dropLast(1)
+                if (label.isBlank() || labels.containsKey(label)) return ParseResult.Error("duplicate/invalid label '$label'")
+                labels[label] = opLines.size
+            } else opLines.add(line)
         }
 
-        fun resolve(token: String): Int? =
-            labels[token] ?: token.toIntOrNull()
+        fun resolve(token: String): Int? = labels[token] ?: token.toIntOrNull()
+        fun pathArg(arg: String?, line: Int, op: String): String? {
+            val value = arg?.trim()
+            return if (value.isNullOrEmpty() || value.contains('\\') || value.startsWith('/') || value.contains("..")) {
+                null
+            } else value
+        }
 
         val instructions = mutableListOf<Instruction>()
         for ((index, line) in opLines.withIndex()) {
             val parts = line.split(Regex("\\s+"), limit = 2)
             val op = parts[0].uppercase()
-            val arg = parts.getOrNull(1)
-
-            val instruction: Instruction = when (op) {
-                "PUSH" -> Instruction.Push(
-                    arg?.toIntOrNull() ?: return ParseResult.Error("line ${index + 1}: PUSH needs an integer")
-                )
+            val arg = parts.getOrNull(1)?.trim()
+            val instruction = when (op) {
+                "PUSH" -> Instruction.Push(arg?.toIntOrNull() ?: return ParseResult.Error("line ${index + 1}: PUSH needs an integer"))
                 "LOAD" -> Instruction.Load(arg ?: return ParseResult.Error("line ${index + 1}: LOAD needs a name"))
                 "STORE" -> Instruction.Store(arg ?: return ParseResult.Error("line ${index + 1}: STORE needs a name"))
                 "ADD" -> Instruction.Add
                 "SUB" -> Instruction.Sub
-                "JMP" -> Instruction.Jmp(
-                    resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown JMP target '$arg'")
-                )
-                "JZ" -> Instruction.Jz(
-                    resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown JZ target '$arg'")
-                )
-                "CALL" -> Instruction.Call(
-                    resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown CALL target '$arg'")
-                )
+                "MUL" -> Instruction.Mul
+                "DIV" -> Instruction.Div
+                "JMP" -> Instruction.Jmp(resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown JMP target '$arg'"))
+                "JZ" -> Instruction.Jz(resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown JZ target '$arg'"))
+                "CALL" -> Instruction.Call(resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown CALL target '$arg'"))
                 "RETURN" -> Instruction.Return
-                "READ" -> Instruction.Read(arg ?: return ParseResult.Error("line ${index + 1}: READ needs a path"))
-                "WRITE" -> Instruction.Write(arg ?: return ParseResult.Error("line ${index + 1}: WRITE needs a path"))
-                "CREATE_PROCESS" -> Instruction.CreateProcess(
-                    arg ?: return ParseResult.Error("line ${index + 1}: CREATE_PROCESS needs a name")
-                )
+                "READ" -> Instruction.Read(pathArg(arg, index + 1, op) ?: return ParseResult.Error("line ${index + 1}: invalid READ path"))
+                "WRITE" -> Instruction.Write(pathArg(arg, index + 1, op) ?: return ParseResult.Error("line ${index + 1}: invalid WRITE path"))
+                "CREATE_PROCESS" -> Instruction.CreateProcess(arg ?: return ParseResult.Error("line ${index + 1}: CREATE_PROCESS needs a name"))
                 "EXIT" -> Instruction.Exit
                 else -> return ParseResult.Error("line ${index + 1}: unknown instruction '$op'")
             }
             instructions.add(instruction)
+        }
+
+        // Validate branch targets before the program can reach the interpreter.
+        for ((i, instruction) in instructions.withIndex()) {
+            val target = when (instruction) {
+                is Instruction.Jmp -> instruction.target
+                is Instruction.Jz -> instruction.target
+                is Instruction.Call -> instruction.target
+                else -> null
+            }
+            if (target != null && target !in instructions.indices) {
+                return ParseResult.Error("instruction ${i + 1}: branch target $target is outside program")
+            }
         }
         return ParseResult.Ok(instructions)
     }

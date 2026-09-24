@@ -92,6 +92,13 @@ class VirtualDevice {
     fun memorySummary(): List<String> = listOf(ram.summary())
     fun processSummary(): List<String> = processManager.list()
     fun filesystemSummary(): List<String> = fileSystem.listRoot()
+    fun kernelSummary(): List<String> = listOf(
+        "Kernel: MyOS kernel 0.1",
+        "Scheduler: round-robin",
+        "Current process: ${processManager.current()?.pid ?: -1}",
+        "Process table: ${processManager.summary()}"
+    )
+
     fun deviceSummary(): List<String> = listOf(
         "Device: Virtual (simulation only, no real hardware access)",
         "OS: $osVersion",

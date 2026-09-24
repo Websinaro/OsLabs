@@ -2,47 +2,73 @@ package com.oslab.simulator.simulator.process
 
 import com.oslab.simulator.security.ResourceLimits
 
+/** A process exists only inside the simulated machine. */
+enum class ProcessState { READY, RUNNING, SLEEPING, TERMINATED }
+
+data class VProcess(
+    val pid: Int,
+    val name: String,
+    var state: ProcessState = ProcessState.READY,
+    var ticks: Long = 0
+)
+
 /**
- * The virtual process table. Entries here are bookkeeping records the
- * interpreter (VirtualCpu) associates its bounded runs with — never real
- * Android processes, and nothing here calls ProcessBuilder, Runtime.exec,
- * or android.os.Process.
+ * Small round-robin scheduler for the virtual OS. It never maps to an Android
+ * process/thread; it only advances bookkeeping for virtual processes.
  */
-data class VProcess(val pid: Int, val name: String, val state: String = "running")
-
 class VirtualProcessManager {
-
-    private var nextPid = 2 // 0 = kernel, 1 = init, both seeded below
+    private var nextPid = 2
+    private var currentPid = 0
     private val processes = linkedMapOf(
-        0 to VProcess(0, "kernel"),
-        1 to VProcess(1, "init")
+        0 to VProcess(0, "kernel", ProcessState.RUNNING),
+        1 to VProcess(1, "init", ProcessState.READY)
     )
 
-    fun summary(): String = "${processes.size} virtual process(es) running"
+    fun summary(): String = "${processes.size} virtual process(es), current pid $currentPid"
 
     fun list(): List<String> = processes.values
         .sortedBy { it.pid }
-        .map { "${it.pid}\t${it.name}\t${it.state}" }
+        .map { "${it.pid}\t${it.name}\t${it.state.name.lowercase()}\tticks=${it.ticks}" }
 
-    /** Returns the new pid, or null if the virtual process table is full. */
     fun create(name: String): Int? {
-        if (processes.size >= ResourceLimits.MAX_PROCESSES) return null
+        val clean = name.trim().take(32)
+        if (clean.isEmpty() || processes.size >= ResourceLimits.MAX_PROCESSES) return null
         val pid = nextPid++
-        processes[pid] = VProcess(pid, name)
+        processes[pid] = VProcess(pid, clean, ProcessState.READY)
         return pid
     }
 
     fun kill(pid: Int): Boolean {
-        if (pid == 0 || pid == 1) return false // kernel / init are not killable
-        return processes.remove(pid) != null
+        if (pid == 0 || pid == 1) return false
+        return processes.remove(pid)?.let {
+            if (currentPid == pid) currentPid = 0
+            true
+        } ?: false
     }
 
     fun exists(pid: Int): Boolean = processes.containsKey(pid)
 
+    /** Advance the virtual scheduler by one tick. */
+    fun tick(): String {
+        val runnable = processes.values.filter { it.state == ProcessState.READY || it.state == ProcessState.RUNNING }
+        if (runnable.isEmpty()) return "scheduler: idle"
+
+        val currentIndex = runnable.indexOfFirst { it.pid == currentPid }
+        val next = runnable[(currentIndex + 1).mod(runnable.size)]
+        processes.values.forEach { if (it.state == ProcessState.RUNNING) it.state = ProcessState.READY }
+        next.state = ProcessState.RUNNING
+        next.ticks++
+        currentPid = next.pid
+        return "scheduler: pid ${next.pid} (${next.name}) running"
+    }
+
+    fun current(): VProcess? = processes[currentPid]
+
     fun reset() {
         processes.clear()
-        processes[0] = VProcess(0, "kernel")
-        processes[1] = VProcess(1, "init")
+        processes[0] = VProcess(0, "kernel", ProcessState.RUNNING)
+        processes[1] = VProcess(1, "init", ProcessState.READY)
         nextPid = 2
+        currentPid = 0
     }
 }

@@ -77,6 +77,9 @@ class TerminalViewModel : ViewModel() {
                 "  clear             clear the terminal",
                 "  version           show virtual OS version",
                 "  memory            show virtual RAM usage",
+                "  cpu               show virtual CPU registers",
+                "  tick              advance the virtual scheduler",
+                "  kernel            show virtual kernel status",
                 "  processes | ps    list virtual processes",
                 "  kill <pid>        kill a virtual process",
                 "  filesystem [path] list a virtual directory",
@@ -94,6 +97,9 @@ class TerminalViewModel : ViewModel() {
             }
             "version" -> listOf(device.osVersion())
             "memory" -> device.memorySummary()
+            "cpu" -> device.cpu.registerSummary()
+            "tick" -> listOf(device.processManager.tick())
+            "kernel" -> device.kernelSummary()
             "processes", "ps" -> device.processSummary()
             "kill" -> {
                 val pid = arg?.toIntOrNull()
@@ -147,9 +153,9 @@ class TerminalViewModel : ViewModel() {
             is com.oslab.simulator.simulator.cpu.VirtualAssembly.ParseResult.Ok -> {
                 when (val result = device.cpu.execute(parsed.instructions, device.fileSystem, device.processManager)) {
                     is com.oslab.simulator.simulator.cpu.VirtualCpu.ExecutionResult.Completed ->
-                        listOf("Program completed.") + result.output
+                        listOf("Program completed in ${result.steps} steps.") + result.output
                     is com.oslab.simulator.simulator.cpu.VirtualCpu.ExecutionResult.Halted ->
-                        listOf("Program halted: ${result.reason}") + result.output
+                        listOf("Program halted after ${result.steps} steps: ${result.reason}") + result.output
                 }
             }
         }

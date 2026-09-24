@@ -15,4 +15,5 @@ object ResourceLimits {
     const val MAX_EXECUTION_MILLIS = 5_000L
     const val MAX_RECURSION_DEPTH = 256
     const val MAX_PROCESSES = 64
+    const val VIRTUAL_STACK_BASE = 0xFF00
 }

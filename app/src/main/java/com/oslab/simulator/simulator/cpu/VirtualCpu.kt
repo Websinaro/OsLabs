@@ -4,112 +4,94 @@ import com.oslab.simulator.security.ResourceLimits
 import com.oslab.simulator.simulator.filesystem.VirtualFileSystem
 import com.oslab.simulator.simulator.process.VirtualProcessManager
 
-/**
- * The bounded instruction interpreter (Stage 7). Every run is capped on
- * three independent axes — instruction count, wall-clock time, and call
- * depth — so an uploaded program cannot hang or stack-overflow the host
- * Android app no matter what it contains; a runaway `JMP` loop simply hits
- * MAX_INSTRUCTIONS and halts with a reported reason instead of spinning
- * forever. This never touches a real thread, timer, or the Android main
- * loop directly — callers are expected to also wrap execution in
- * security.SandboxController.runContained as a second line of defense.
- */
+/** Deterministic, bounded virtual CPU. It executes only Instruction values. */
 class VirtualCpu {
+    data class Registers(
+        var pc: Int = 0,
+        var sp: Int = 0,
+        var r0: Int = 0,
+        var r1: Int = 0,
+        var r2: Int = 0,
+        var r3: Int = 0,
+        var zero: Boolean = false,
+        var halted: Boolean = false
+    )
 
     sealed class ExecutionResult {
-        data class Halted(val output: List<String>, val reason: String) : ExecutionResult()
-        data class Completed(val output: List<String>) : ExecutionResult()
+        data class Halted(val output: List<String>, val reason: String, val steps: Int, val registers: Registers) : ExecutionResult()
+        data class Completed(val output: List<String>, val steps: Int, val registers: Registers) : ExecutionResult()
     }
 
+    private var last = Registers()
     fun summary(): String = "vCPU-1 (interpreted, single-core, bounded)"
+    fun registers(): Registers = last.copy()
 
-    fun execute(
-        program: List<Instruction>,
-        fileSystem: VirtualFileSystem,
-        processManager: VirtualProcessManager
-    ): ExecutionResult {
-        if (program.isEmpty()) return ExecutionResult.Completed(emptyList())
+    fun registerSummary(): List<String> = listOf(
+        "Architecture: vCPU-1",
+        "PC: 0x%04X".format(last.pc),
+        "SP: 0x%04X".format(last.sp),
+        "R0: ${last.r0}",
+        "R1: ${last.r1}",
+        "R2: ${last.r2}",
+        "R3: ${last.r3}",
+        "ZERO: ${last.zero}",
+        "State: ${if (last.halted) "HALTED" else "READY"}"
+    )
 
-        val stack = ArrayDeque<Int>()
-        val callStack = ArrayDeque<Int>()
+    fun execute(program: List<Instruction>, fileSystem: VirtualFileSystem, processManager: VirtualProcessManager): ExecutionResult {
+        if (program.isEmpty()) return ExecutionResult.Completed(emptyList(), 0, last.copy())
+        val stack = mutableListOf<Int>()
+        val callStack = mutableListOf<Int>()
         val vars = mutableMapOf<String, Int>()
         val output = mutableListOf<String>()
-
-        var pc = 0
+        val regs = Registers(sp = ResourceLimits.VIRTUAL_STACK_BASE)
         var steps = 0
         val startTime = System.currentTimeMillis()
 
-        while (pc in program.indices) {
-            steps++
-            if (steps > ResourceLimits.MAX_INSTRUCTIONS) {
-                return ExecutionResult.Halted(output, "instruction limit exceeded (${ResourceLimits.MAX_INSTRUCTIONS})")
-            }
-            if (System.currentTimeMillis() - startTime > ResourceLimits.MAX_EXECUTION_MILLIS) {
-                return ExecutionResult.Halted(output, "execution time limit exceeded (${ResourceLimits.MAX_EXECUTION_MILLIS}ms)")
-            }
-
-            when (val instr = program[pc]) {
-                is Instruction.Push -> {
-                    stack.addLast(instr.value)
-                    pc++
-                }
-                is Instruction.Load -> {
-                    stack.addLast(vars[instr.name] ?: 0)
-                    pc++
-                }
-                is Instruction.Store -> {
-                    val v = stack.removeLastOrNull() ?: return ExecutionResult.Halted(output, "STORE on empty stack")
-                    vars[instr.name] = v
-                    pc++
-                }
-                Instruction.Add -> {
-                    val b = stack.removeLastOrNull()
-                    val a = stack.removeLastOrNull()
-                    if (a == null || b == null) return ExecutionResult.Halted(output, "ADD on empty stack")
-                    stack.addLast(a + b)
-                    pc++
-                }
-                Instruction.Sub -> {
-                    val b = stack.removeLastOrNull()
-                    val a = stack.removeLastOrNull()
-                    if (a == null || b == null) return ExecutionResult.Halted(output, "SUB on empty stack")
-                    stack.addLast(a - b)
-                    pc++
-                }
-                is Instruction.Jmp -> pc = instr.target
-                is Instruction.Jz -> {
-                    val v = stack.removeLastOrNull() ?: return ExecutionResult.Halted(output, "JZ on empty stack")
-                    pc = if (v == 0) instr.target else pc + 1
-                }
-                is Instruction.Call -> {
-                    if (callStack.size >= ResourceLimits.MAX_RECURSION_DEPTH) {
-                        return ExecutionResult.Halted(output, "recursion limit exceeded (${ResourceLimits.MAX_RECURSION_DEPTH})")
-                    }
-                    callStack.addLast(pc + 1)
-                    pc = instr.target
-                }
-                Instruction.Return -> {
-                    pc = callStack.removeLastOrNull() ?: return ExecutionResult.Halted(output, "RETURN with empty call stack")
-                }
-                is Instruction.Read -> {
-                    stack.addLast(if (fileSystem.exists(instr.path)) 1 else 0)
-                    pc++
-                }
-                is Instruction.Write -> {
-                    val v = stack.removeLastOrNull() ?: return ExecutionResult.Halted(output, "WRITE on empty stack")
-                    fileSystem.write(instr.path, v.toString().toByteArray())
-                    output.add("WRITE ${instr.path} <- $v")
-                    pc++
-                }
-                is Instruction.CreateProcess -> {
-                    val pid = processManager.create(instr.name)
-                    stack.addLast(pid ?: -1)
-                    output.add(if (pid != null) "CREATE_PROCESS ${instr.name} -> pid $pid" else "CREATE_PROCESS ${instr.name} -> failed (process table full)")
-                    pc++
-                }
-                Instruction.Exit -> return ExecutionResult.Completed(output)
-            }
+        fun halted(reason: String) = ExecutionResult.Halted(output.toList(), reason, steps, regs.copy())
+        fun pop(): Int? = if (stack.isEmpty()) null else stack.removeAt(stack.lastIndex)
+        fun binary(name: String, op: (Int, Int) -> Int): String? {
+            val b = pop() ?: return "$name on empty stack"
+            val a = pop() ?: return "$name on empty stack"
+            stack.add(op(a, b))
+            regs.zero = (a == 0)
+            regs.sp = ResourceLimits.VIRTUAL_STACK_BASE - stack.size
+            return null
         }
-        return ExecutionResult.Completed(output)
+
+        while (regs.pc in program.indices) {
+            if (++steps > ResourceLimits.MAX_INSTRUCTIONS) return halted("instruction limit exceeded (${ResourceLimits.MAX_INSTRUCTIONS})")
+            if (System.currentTimeMillis() - startTime > ResourceLimits.MAX_EXECUTION_MILLIS) return halted("execution time limit exceeded (${ResourceLimits.MAX_EXECUTION_MILLIS}ms)")
+            val instr = program[regs.pc]
+            when (instr) {
+                is Instruction.Push -> { stack.add(instr.value); regs.pc++ }
+                is Instruction.Load -> { stack.add(vars[instr.name] ?: 0); regs.pc++ }
+                is Instruction.Store -> { val v = pop() ?: return halted("STORE on empty stack"); vars[instr.name] = v; regs.r0 = v; regs.pc++ }
+                Instruction.Add -> { binary("ADD") { a, b -> a + b }?.let { return halted(it) }; regs.pc++ }
+                Instruction.Sub -> { binary("SUB") { a, b -> a - b }?.let { return halted(it) }; regs.pc++ }
+                Instruction.Mul -> { binary("MUL") { a, b -> a * b }?.let { return halted(it) }; regs.pc++ }
+                Instruction.Div -> {
+                    val b = pop() ?: return halted("DIV on empty stack")
+                    val a = pop() ?: return halted("DIV on empty stack")
+                    if (b == 0) return halted("division by zero")
+                    stack.add(a / b); regs.zero = (a / b == 0); regs.pc++
+                }
+                is Instruction.Jmp -> regs.pc = instr.target
+                is Instruction.Jz -> { val v = pop() ?: return halted("JZ on empty stack"); regs.zero = (v == 0); regs.pc = if (v == 0) instr.target else regs.pc + 1 }
+                is Instruction.Call -> { if (callStack.size >= ResourceLimits.MAX_RECURSION_DEPTH) return halted("recursion limit exceeded (${ResourceLimits.MAX_RECURSION_DEPTH})"); callStack.add(regs.pc + 1); regs.pc = instr.target }
+                Instruction.Return -> {
+                    if (callStack.isEmpty()) return halted("RETURN with empty call stack")
+                    regs.pc = callStack.removeAt(callStack.lastIndex)
+                }
+                is Instruction.Read -> { stack.add(if (fileSystem.exists(instr.path)) 1 else 0); regs.pc++ }
+                is Instruction.Write -> { val v = pop() ?: return halted("WRITE on empty stack"); if (!fileSystem.write(instr.path, v.toString().toByteArray())) return halted("WRITE failed: virtual storage limit reached or invalid path"); output.add("WRITE ${instr.path} <- $v"); regs.pc++ }
+                is Instruction.CreateProcess -> { val pid = processManager.create(instr.name); stack.add(pid ?: -1); output.add(if (pid != null) "CREATE_PROCESS ${instr.name} -> pid $pid" else "CREATE_PROCESS ${instr.name} -> failed"); regs.pc++ }
+                Instruction.Exit -> { regs.halted = true; last = regs.copy(); return ExecutionResult.Completed(output, steps, regs.copy()) }
+            }
+            regs.sp = ResourceLimits.VIRTUAL_STACK_BASE - stack.size
+        }
+        regs.halted = true
+        last = regs.copy()
+        return ExecutionResult.Completed(output, steps, regs.copy())
     }
 }

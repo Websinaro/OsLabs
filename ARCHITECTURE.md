@@ -148,7 +148,8 @@ package, 256 MB expanded, 16 MB per file, 5000 files max.
 | 5 | Update simulation: snapshot → apply → boot test → commit or roll back | **Implemented** |
 | 6 | Virtual display (desktop of tappable app icons sourced from `apps/` in the VFS) | **Implemented** (framebuffer/pixel-level rendering deferred — the display is icon/text based, not a bitmap surface) |
 | 7 | Bounded instruction interpreter (`LOAD/STORE/PUSH/ADD/SUB/JMP/JZ/CALL/RETURN/READ/WRITE/CREATE_PROCESS/EXIT`), a small two-pass assembler (`VirtualAssembly`), and hard caps on instruction count / wall-clock time / recursion depth | **Implemented** |
-| 8 | Virtual input (tap → app launch), terminal ↔ device interaction, `launch`/`run`/`ps`/`kill` commands | **Implemented** (a full "OS UI framework" with real windowing is out of scope — apps are single-shot programs that run to completion and report output, not persistent windows) |
+| 8 | Virtual input (tap → app launch), terminal ↔ device interaction, `launch`/`run`/`ps`/`kill` commands | **Implemented** |
+| 9 | Virtual kernel/scheduler, process states and ticks, vCPU registers, MUL/DIV, stronger assembler branch/path validation | **Implemented** |
 
 ### What's deliberately simplified
 - **Update targeting**: a package's `manifest.json` `targetVersion` must exactly match the running OS version — there's no multi-step upgrade chain.
