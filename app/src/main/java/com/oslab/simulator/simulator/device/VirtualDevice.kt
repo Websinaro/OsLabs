@@ -33,7 +33,8 @@ import com.oslab.simulator.security.PermissionManager
  */
 class VirtualDevice {
 
-    private var osVersion = "MyOS 1.0"
+    private var osName = "MyOS"
+    private var osVersionNumber = "1.0"
     private var bootCount = 0
 
     val cpu = VirtualCpu()
@@ -72,21 +73,28 @@ class VirtualDevice {
             "[OK] Virtual permissions initialized",
             "[OK] Virtual display initialized (${display.summary()})",
             "[OK] Virtual input initialized",
-            "[OK] $osVersion ready. Boot #$bootCount."
+            "[OK] ${osVersion()} ready. Boot #$bootCount."
         )
     }
 
-    fun osVersion(): String = osVersion
+    /** OS identity, e.g. "MyOS" — checked against manifest.name during an update. */
+    fun osName(): String = osName
+
+    /** OS version number alone, e.g. "1.0" — checked against manifest.targetVersion. */
+    fun osVersionNumber(): String = osVersionNumber
+
+    /** Combined display label, e.g. "MyOS 1.0". Used for UI/log output only. */
+    fun osVersion(): String = "$osName $osVersionNumber"
 
     /** Called only by UpdateEngine after a successful, validated update. */
-    internal fun setOsVersion(version: String) {
-        osVersion = version
+    internal fun setOsVersion(versionNumber: String) {
+        osVersionNumber = versionNumber
     }
 
     fun reboot(): String {
         processManager.reset()
         bootLog()
-        return osVersion
+        return osVersion()
     }
 
     fun memorySummary(): List<String> = listOf(ram.summary())
@@ -101,7 +109,7 @@ class VirtualDevice {
 
     fun deviceSummary(): List<String> = listOf(
         "Device: Virtual (simulation only, no real hardware access)",
-        "OS: $osVersion",
+        "OS: ${osVersion()}",
         "CPU: ${cpu.summary()}",
         "RAM: ${ram.summary()}",
         "Display: ${display.summary()}"

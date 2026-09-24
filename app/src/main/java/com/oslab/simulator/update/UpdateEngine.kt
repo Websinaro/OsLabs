@@ -37,12 +37,16 @@ object UpdateEngine {
         }
         log.add("[OK] Manifest validation — ${manifest.name} ${manifest.version} (targets ${manifest.targetVersion})")
 
-        val compat = ManifestValidator.validateCompatibility(manifest, device.osVersion())
+        val compat = ManifestValidator.validateCompatibility(
+            manifest,
+            device.osName(),
+            device.osVersionNumber()
+        )
         if (compat is ValidationResult.Invalid) {
             log.add("[FAIL] Compatibility check — ${compat.reason}")
             return UpdateOutcome.Failed(log, compat.reason)
         }
-        log.add("[OK] Compatibility check — targetVersion matches running OS")
+        log.add("[OK] Compatibility check — ${device.osVersion()} → ${device.osName()} ${manifest.version}")
 
         val snapshot = device.fileSystem.snapshot()
         log.add("[OK] Virtual filesystem snapshot taken")
@@ -73,7 +77,7 @@ object UpdateEngine {
         log.add("[OK] Boot test — virtual OS booted successfully")
 
         device.setOsVersion(manifest.version)
-        log.add("UPDATE SIMULATION SUCCESSFUL — now running ${manifest.version}")
+        log.add("UPDATE SIMULATION SUCCESSFUL — now running ${device.osVersion()}")
         log.add("The real Android device was not modified.")
         return UpdateOutcome.Success(log)
     }
