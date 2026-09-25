@@ -1,5 +1,6 @@
 package com.oslab.simulator.simulator.device
 
+import com.oslab.simulator.boot.BootManager
 import com.oslab.simulator.security.SandboxController
 import com.oslab.simulator.simulator.cpu.Instruction
 import com.oslab.simulator.simulator.cpu.VirtualAssembly
@@ -33,9 +34,13 @@ import com.oslab.simulator.security.PermissionManager
  */
 class VirtualDevice {
 
+    /** High-level lifecycle state of the simulated OS (Stage 6). */
+    enum class OsState { OFF, BOOTING, RUNNING, CRASHED, UPDATING, ROLLING_BACK, STOPPED }
+
     private var osName = "MyOS"
     private var osVersionNumber = "1.0"
     private var bootCount = 0
+    private var state = OsState.OFF
 
     val cpu = VirtualCpu()
     val ram = VirtualRam()
@@ -46,6 +51,21 @@ class VirtualDevice {
     val input = VirtualInput()
 
     init {
+        // Seed the user's kernel (system/kernel.vasm) exactly as authored —
+        // this is the user's own OS content, not code invented by the
+        // simulator. BootManager loads and runs it from here on every boot.
+        fileSystem.write(
+            "system/kernel.vasm",
+            """
+            PRINT "Boot loading Start...."
+            PRINT "CPU, RAM, Other functions are waking....."
+            PRINT "Initialising resources...."
+            PRINT "Check Security"
+            PRINT "SUCCESSFUL"
+            HALT
+            """.trimIndent().toByteArray()
+        )
+
         // Seed a couple of built-in demo apps so the desktop isn't empty
         // before any update package has ever been imported.
         fileSystem.mkdir("apps/Notes")
@@ -63,19 +83,41 @@ class VirtualDevice {
         )
     }
 
+    /**
+     * Full boot sequence: bring up the virtual hardware, then hand control
+     * to BootManager to load and run the user's system/kernel.vasm. The OS
+     * only reaches RUNNING if the kernel actually parses and executes to
+     * completion — a version-label change is never treated as a boot.
+     */
     fun bootLog(): List<String> {
         bootCount++
-        return listOf(
+        state = OsState.BOOTING
+        val log = mutableListOf(
             "[OK] Virtual CPU initialized (${cpu.summary()})",
             "[OK] Virtual RAM initialized (${ram.summary()})",
             "[OK] Virtual filesystem initialized (${fileSystem.summary()})",
             "[OK] Virtual process manager initialized (${processManager.summary()})",
             "[OK] Virtual permissions initialized",
             "[OK] Virtual display initialized (${display.summary()})",
-            "[OK] Virtual input initialized",
-            "[OK] ${osVersion()} ready. Boot #$bootCount."
+            "[OK] Virtual input initialized"
         )
+
+        when (val result = BootManager.boot(fileSystem, cpu, processManager)) {
+            is BootManager.BootResult.Success -> {
+                log.addAll(result.log)
+                state = OsState.RUNNING
+                log.add("[OK] ${osVersion()} ready. Boot #$bootCount.")
+            }
+            is BootManager.BootResult.Failed -> {
+                log.addAll(result.log)
+                state = OsState.CRASHED
+                log.add("[FAIL] ${osVersion()} failed to boot. Boot #$bootCount.")
+            }
+        }
+        return log
     }
+
+    fun state(): OsState = state
 
     /** OS identity, e.g. "MyOS" — checked against manifest.name during an update. */
     fun osName(): String = osName
@@ -91,10 +133,10 @@ class VirtualDevice {
         osVersionNumber = versionNumber
     }
 
-    fun reboot(): String {
+    /** Resets the process table and re-runs the full boot sequence, returning its log. */
+    fun reboot(): List<String> {
         processManager.reset()
-        bootLog()
-        return osVersion()
+        return bootLog()
     }
 
     fun memorySummary(): List<String> = listOf(ram.summary())
@@ -109,7 +151,7 @@ class VirtualDevice {
 
     fun deviceSummary(): List<String> = listOf(
         "Device: Virtual (simulation only, no real hardware access)",
-        "OS: ${osVersion()}",
+        "OS: ${osVersion()} [$state]",
         "CPU: ${cpu.summary()}",
         "RAM: ${ram.summary()}",
         "Display: ${display.summary()}"

@@ -126,10 +126,10 @@ class TerminalViewModel : ViewModel() {
             }
             "reboot" -> {
                 status = "Rebooting"
-                device.reboot()
+                val bootLines = device.reboot()
                 refreshDesktop()
                 status = "Running"
-                listOf("Virtual OS rebooted.")
+                bootLines
             }
             "shutdown" -> {
                 status = "Shut down"

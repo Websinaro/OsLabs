@@ -86,6 +86,17 @@ class VirtualCpu {
                 is Instruction.Read -> { stack.add(if (fileSystem.exists(instr.path)) 1 else 0); regs.pc++ }
                 is Instruction.Write -> { val v = pop() ?: return halted("WRITE on empty stack"); if (!fileSystem.write(instr.path, v.toString().toByteArray())) return halted("WRITE failed: virtual storage limit reached or invalid path"); output.add("WRITE ${instr.path} <- $v"); regs.pc++ }
                 is Instruction.CreateProcess -> { val pid = processManager.create(instr.name); stack.add(pid ?: -1); output.add(if (pid != null) "CREATE_PROCESS ${instr.name} -> pid $pid" else "CREATE_PROCESS ${instr.name} -> failed"); regs.pc++ }
+                is Instruction.Print -> {
+                    val text = instr.literal ?: when (instr.varName?.uppercase()) {
+                        "R0" -> regs.r0.toString()
+                        "R1" -> regs.r1.toString()
+                        "R2" -> regs.r2.toString()
+                        "R3" -> regs.r3.toString()
+                        else -> (vars[instr.varName] ?: 0).toString()
+                    }
+                    output.add(text)
+                    regs.pc++
+                }
                 Instruction.Exit -> { regs.halted = true; last = regs.copy(); return ExecutionResult.Completed(output, steps, regs.copy()) }
             }
             regs.sp = ResourceLimits.VIRTUAL_STACK_BASE - stack.size

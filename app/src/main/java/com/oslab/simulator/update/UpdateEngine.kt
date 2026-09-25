@@ -57,21 +57,27 @@ object UpdateEngine {
         }
         log.add("[OK] Virtual filesystem update applied (${pkg.files.size} files)")
 
+        // reboot() re-runs the full boot sequence, which hands
+        // system/kernel.vasm to BootManager and only reaches RUNNING if the
+        // kernel actually parses and executes — never just a label change.
         val bootOutcome = SandboxController.runContained {
-            device.reboot()
-            // Minimal boot test: the core directories must still resolve.
-            listOf("system", "apps", "config", "resources").all { device.fileSystem.isDirectory(it) }
+            val bootLines = device.reboot()
+            val coreDirsOk = listOf("system", "apps", "config", "resources").all { device.fileSystem.isDirectory(it) }
+            Pair(bootLines, coreDirsOk && device.state() == VirtualDevice.OsState.RUNNING)
         }
 
-        val bootOk = when (bootOutcome) {
+        val (bootLines, bootOk) = when (bootOutcome) {
             is SandboxController.ContainedResult.Success -> bootOutcome.value
-            is SandboxController.ContainedResult.Crashed -> false
+            is SandboxController.ContainedResult.Crashed -> Pair(listOf("[FAIL] reboot crashed inside the simulation: ${bootOutcome.reason}"), false)
         }
+        log.addAll(bootLines)
 
         if (!bootOk) {
             device.fileSystem.restore(snapshot)
             log.add("[FAIL] Boot test — virtual OS failed to boot on the updated filesystem")
+            log.addAll(device.reboot())
             log.add("[OK] Rolled back to the pre-update snapshot")
+            log.add("[OK] Previous OS restored")
             return UpdateOutcome.Failed(log, "boot test failed; rolled back")
         }
         log.add("[OK] Boot test — virtual OS booted successfully")

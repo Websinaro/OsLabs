@@ -50,7 +50,15 @@ object VirtualAssembly {
                 "READ" -> Instruction.Read(pathArg(arg, index + 1, op) ?: return ParseResult.Error("line ${index + 1}: invalid READ path"))
                 "WRITE" -> Instruction.Write(pathArg(arg, index + 1, op) ?: return ParseResult.Error("line ${index + 1}: invalid WRITE path"))
                 "CREATE_PROCESS" -> Instruction.CreateProcess(arg ?: return ParseResult.Error("line ${index + 1}: CREATE_PROCESS needs a name"))
-                "EXIT" -> Instruction.Exit
+                "PRINT" -> {
+                    val raw = arg ?: return ParseResult.Error("line ${index + 1}: PRINT needs a string or a name")
+                    if (raw.length >= 2 && raw.startsWith('"') && raw.endsWith('"')) {
+                        Instruction.Print(literal = raw.substring(1, raw.length - 1), varName = null)
+                    } else {
+                        Instruction.Print(literal = null, varName = raw)
+                    }
+                }
+                "EXIT", "HALT" -> Instruction.Exit
                 else -> return ParseResult.Error("line ${index + 1}: unknown instruction '$op'")
             }
             instructions.add(instruction)

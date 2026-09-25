@@ -16,5 +16,7 @@ sealed class Instruction {
     data class Read(val path: String) : Instruction()
     data class Write(val path: String) : Instruction()
     data class CreateProcess(val name: String) : Instruction()
+    /** literal is set for `PRINT "text"`, varName is set for `PRINT name` / `PRINT R0`. */
+    data class Print(val literal: String?, val varName: String?) : Instruction()
     object Exit : Instruction()
 }

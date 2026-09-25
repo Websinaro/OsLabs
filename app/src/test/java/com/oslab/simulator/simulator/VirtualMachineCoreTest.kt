@@ -34,6 +34,22 @@ class VirtualMachineCoreTest {
     }
 
     @Test
+    fun printLiteralAndVariableAreRoutedToOutput() {
+        val fs = VirtualFileSystem(VirtualRam())
+        val pm = VirtualProcessManager()
+        val source = """
+            PRINT "hello kernel"
+            PUSH 42
+            STORE total
+            PRINT total
+            EXIT
+        """.trimIndent()
+        val parsed = VirtualAssembly.parse(source) as VirtualAssembly.ParseResult.Ok
+        val result = VirtualCpu().execute(parsed.instructions, fs, pm) as VirtualCpu.ExecutionResult.Completed
+        assertEquals(listOf("hello kernel", "42"), result.output)
+    }
+
+    @Test
     fun schedulerAdvancesVirtualProcess() {
         val pm = VirtualProcessManager()
         val pid = pm.create("demo")!!
