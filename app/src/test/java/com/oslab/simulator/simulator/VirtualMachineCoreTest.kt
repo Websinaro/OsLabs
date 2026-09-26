@@ -50,6 +50,56 @@ class VirtualMachineCoreTest {
     }
 
     @Test
+    fun cmpJnzAndLabelsBranchOnInequality() {
+        val fs = VirtualFileSystem(VirtualRam())
+        val pm = VirtualProcessManager()
+        val source = """
+            PUSH 5
+            PUSH 3
+            CMP
+            JNZ different
+            PRINT "same"
+            EXIT
+            different:
+            PRINT "different"
+            EXIT
+        """.trimIndent()
+        val parsed = VirtualAssembly.parse(source) as VirtualAssembly.ParseResult.Ok
+        val result = VirtualCpu().execute(parsed.instructions, fs, pm) as VirtualCpu.ExecutionResult.Completed
+        assertEquals(listOf("different"), result.output)
+    }
+
+    @Test
+    fun checkPassesOnTruthyStackValue() {
+        val fs = VirtualFileSystem(VirtualRam())
+        val pm = VirtualProcessManager()
+        val source = """
+            PUSH 1
+            CHECK
+            PRINT "passed"
+            EXIT
+        """.trimIndent()
+        val parsed = VirtualAssembly.parse(source) as VirtualAssembly.ParseResult.Ok
+        val result = VirtualCpu().execute(parsed.instructions, fs, pm) as VirtualCpu.ExecutionResult.Completed
+        assertEquals(listOf("[CHECK] passed", "passed"), result.output)
+    }
+
+    @Test
+    fun checkHaltsProgramOnFalsyStackValue() {
+        val fs = VirtualFileSystem(VirtualRam())
+        val pm = VirtualProcessManager()
+        val source = """
+            PUSH 0
+            CHECK
+            PRINT "unreachable"
+            EXIT
+        """.trimIndent()
+        val parsed = VirtualAssembly.parse(source) as VirtualAssembly.ParseResult.Ok
+        val result = VirtualCpu().execute(parsed.instructions, fs, pm) as VirtualCpu.ExecutionResult.Halted
+        assertTrue(result.reason.contains("CHECK failed"))
+    }
+
+    @Test
     fun schedulerAdvancesVirtualProcess() {
         val pm = VirtualProcessManager()
         val pid = pm.create("demo")!!

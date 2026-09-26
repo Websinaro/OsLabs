@@ -57,8 +57,9 @@ object UpdateEngine {
         }
         log.add("[OK] Virtual filesystem update applied (${pkg.files.size} files)")
 
-        // reboot() re-runs the full boot sequence, which hands
-        // system/kernel.vasm to BootManager and only reaches RUNNING if the
+        // reboot() re-runs the full boot sequence, which hands the boot
+        // entry point (system/boot.vasm, falling back to system/post.vasm)
+        // to BootManager and only reaches RUNNING if the
         // kernel actually parses and executes — never just a label change.
         val bootOutcome = SandboxController.runContained {
             val bootLines = device.reboot()

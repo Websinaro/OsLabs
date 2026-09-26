@@ -45,6 +45,7 @@ object VirtualAssembly {
                 "DIV" -> Instruction.Div
                 "JMP" -> Instruction.Jmp(resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown JMP target '$arg'"))
                 "JZ" -> Instruction.Jz(resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown JZ target '$arg'"))
+                "JNZ" -> Instruction.Jnz(resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown JNZ target '$arg'"))
                 "CALL" -> Instruction.Call(resolve(arg ?: "") ?: return ParseResult.Error("line ${index + 1}: unknown CALL target '$arg'"))
                 "RETURN" -> Instruction.Return
                 "READ" -> Instruction.Read(pathArg(arg, index + 1, op) ?: return ParseResult.Error("line ${index + 1}: invalid READ path"))
@@ -59,6 +60,8 @@ object VirtualAssembly {
                     }
                 }
                 "EXIT", "HALT" -> Instruction.Exit
+                "CMP" -> Instruction.Cmp
+                "CHECK" -> Instruction.Check
                 else -> return ParseResult.Error("line ${index + 1}: unknown instruction '$op'")
             }
             instructions.add(instruction)
@@ -69,6 +72,7 @@ object VirtualAssembly {
             val target = when (instruction) {
                 is Instruction.Jmp -> instruction.target
                 is Instruction.Jz -> instruction.target
+                is Instruction.Jnz -> instruction.target
                 is Instruction.Call -> instruction.target
                 else -> null
             }

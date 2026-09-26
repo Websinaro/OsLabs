@@ -53,8 +53,9 @@ class VirtualCpu {
         fun binary(name: String, op: (Int, Int) -> Int): String? {
             val b = pop() ?: return "$name on empty stack"
             val a = pop() ?: return "$name on empty stack"
-            stack.add(op(a, b))
-            regs.zero = (a == 0)
+            val result = op(a, b)
+            stack.add(result)
+            regs.zero = (result == 0)
             regs.sp = ResourceLimits.VIRTUAL_STACK_BASE - stack.size
             return null
         }
@@ -77,7 +78,8 @@ class VirtualCpu {
                     stack.add(a / b); regs.zero = (a / b == 0); regs.pc++
                 }
                 is Instruction.Jmp -> regs.pc = instr.target
-                is Instruction.Jz -> { val v = pop() ?: return halted("JZ on empty stack"); regs.zero = (v == 0); regs.pc = if (v == 0) instr.target else regs.pc + 1 }
+                is Instruction.Jz -> regs.pc = if (regs.zero) instr.target else regs.pc + 1
+                is Instruction.Jnz -> regs.pc = if (!regs.zero) instr.target else regs.pc + 1
                 is Instruction.Call -> { if (callStack.size >= ResourceLimits.MAX_RECURSION_DEPTH) return halted("recursion limit exceeded (${ResourceLimits.MAX_RECURSION_DEPTH})"); callStack.add(regs.pc + 1); regs.pc = instr.target }
                 Instruction.Return -> {
                     if (callStack.isEmpty()) return halted("RETURN with empty call stack")
@@ -98,6 +100,18 @@ class VirtualCpu {
                     regs.pc++
                 }
                 Instruction.Exit -> { regs.halted = true; last = regs.copy(); return ExecutionResult.Completed(output, steps, regs.copy()) }
+                Instruction.Cmp -> {
+                    val b = pop() ?: return halted("CMP on empty stack")
+                    val a = pop() ?: return halted("CMP on empty stack")
+                    regs.zero = (a == b)
+                    regs.pc++
+                }
+                Instruction.Check -> {
+                    val v = pop() ?: return halted("CHECK on empty stack")
+                    if (v == 0) return halted("CHECK failed")
+                    output.add("[CHECK] passed")
+                    regs.pc++
+                }
             }
             regs.sp = ResourceLimits.VIRTUAL_STACK_BASE - stack.size
         }

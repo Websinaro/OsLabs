@@ -51,16 +51,26 @@ class VirtualDevice {
     val input = VirtualInput()
 
     init {
-        // Seed the user's kernel (system/kernel.vasm) exactly as authored —
-        // this is the user's own OS content, not code invented by the
-        // simulator. BootManager loads and runs it from here on every boot.
+        // Seed the user's kernel at the boot entry point (system/boot.vasm)
+        // exactly as authored — this is the user's own OS content, not code
+        // invented by the simulator. BootManager loads and runs it from here
+        // on every boot, falling back to system/post.vasm if this is empty.
         fileSystem.write(
-            "system/kernel.vasm",
+            "system/boot.vasm",
             """
             PRINT "Boot loading Start...."
             PRINT "CPU, RAM, Other functions are waking....."
             PRINT "Initialising resources...."
+            PUSH 1
+            CHECK
             PRINT "Check Security"
+            PUSH 1
+            PUSH 1
+            CMP
+            JZ security_ok
+            PRINT "Security check FAILED"
+            HALT
+            security_ok:
             PRINT "SUCCESSFUL"
             HALT
             """.trimIndent().toByteArray()
@@ -85,9 +95,10 @@ class VirtualDevice {
 
     /**
      * Full boot sequence: bring up the virtual hardware, then hand control
-     * to BootManager to load and run the user's system/kernel.vasm. The OS
-     * only reaches RUNNING if the kernel actually parses and executes to
-     * completion — a version-label change is never treated as a boot.
+     * to BootManager, which loads system/boot.vasm (or system/post.vasm if
+     * boot.vasm is missing/empty) and runs it. The OS only reaches RUNNING
+     * if that program actually parses and executes to completion — a
+     * version-label change is never treated as a boot.
      */
     fun bootLog(): List<String> {
         bootCount++
